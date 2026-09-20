@@ -1,8 +1,30 @@
 # ToneBar
 
-A tiny macOS menu bar app that shows an emoji reflecting the sentiment of whatever text you are typing right now — in any app — using Apple's NaturalLanguage framework for on-device sentiment analysis (no network, no API keys).
+A tiny macOS menu bar app that shows an emoji reflecting the sentiment of whatever text you are typing right now — in any app — using [LayaKit](https://github.com/tahby/LayaKit) for on-device sentiment scoring (no network, no API keys).
 
 ToneBar polls the system-wide focused UI element via the macOS Accessibility API a few times a second, reads its text value, scores it, and updates the status bar emoji. When the focused element doesn't expose readable text (a button, a canvas, a web view that hides its value), the last emoji stays put rather than flickering back to neutral.
+
+## Requirements
+
+- macOS 15+
+- Apple silicon
+- Xcode with Swift 6 toolchain
+
+## Download the LayaKit model bundle
+
+LayaKit needs a model bundle on disk. Download it with the Hugging Face CLI:
+
+```
+hf download aac6fef/laya-multilingual-coreml --local-dir ~/"Library/Application Support/ToneBar/laya-bundle"
+```
+
+ToneBar looks for a bundle in that default location. Set the `TONEBAR_BUNDLE` environment variable to point at a different bundle instead, e.g. for testing against LayaKit's own bundle:
+
+```
+TONEBAR_BUNDLE=/path/to/LayaKit/models/general swift run
+```
+
+On first launch, loading and warming the LayaKit model takes about 2-3 seconds; the status item shows ⏳ with "Loading LayaKit model…" during that time. If no bundle is found at all, the status item shows ⏳ with instructions for the `hf download` command above.
 
 ## Accessibility permission
 
@@ -21,6 +43,10 @@ Then type in Mail, Notes, Messages, a browser — anywhere. The status bar emoji
 ## Quit
 
 Right-click (or control-click) the status item and choose "Quit ToneBar" — there's no Dock icon since this is a menu bar-only app.
+
+## NaturalLanguage
+
+Apple's NaturalLanguage framework is still used internally, as the `NLTone` enum in `Sources/ToneBar/ToneAnalyzer.swift`, though it no longer drives the main menu bar display. It's kept around for a future evaluation tool that compares it against LayaKit.
 
 ## License
 

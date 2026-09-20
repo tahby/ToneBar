@@ -13,6 +13,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pollTimer: Timer?
     private var isTrusted = false
     private var lastReadText: String?
+    private let layaTone = LayaTone()
+    private var layaState: LayaToneState = .notLoaded
+    private var generation = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -32,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         isTrusted = AXIsProcessTrusted()
         if isTrusted {
-            showWaitingForText()
+            showCurrentLayaState()
         } else {
             _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
             showAccessibilityNeeded()
@@ -45,6 +48,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         RunLoop.main.add(timer, forMode: .common)
         pollTimer = timer
+
+        Task {
+            await layaTone.load()
+            layaState = await layaTone.state
+            if isTrusted {
+                lastReadText = nil
+                showCurrentLayaState()
+            }
+        }
     }
 
     private func buildPopover() {
@@ -88,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !isTrusted {
             guard AXIsProcessTrusted() else { return }
             isTrusted = true
-            showWaitingForText()
+            showCurrentLayaState()
         }
 
         guard let text = focusedText(), text != lastReadText else { return }
@@ -114,6 +126,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func show(text: String) {
+        generation += 1
+        let currentGeneration = generation
+
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             statusItem.button?.title = "😐"
@@ -123,17 +138,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let score = ToneAnalyzer.score(for: text)
-        let emoji = ToneAnalyzer.emoji(forScore: score)
-        statusItem.button?.title = emoji
-
-        summaryLabel.stringValue = "\(emoji)  \(String(format: "%.2f", score))"
-
-        let breakdown = ToneAnalyzer.breakdown(for: text)
-        showBreakdown(positive: breakdown.positive, neutral: breakdown.neutral, negative: breakdown.negative)
+        guard case .ready = layaState else {
+            showCurrentLayaState()
+            return
+        }
 
         let collapsed = trimmed.split(whereSeparator: \.isNewline).joined(separator: " ")
-        detailLabel.stringValue = collapsed.count > 180 ? String(collapsed.prefix(180)) + "…" : collapsed
+        let preview = collapsed.count > 180 ? String(collapsed.prefix(180)) + "…" : collapsed
+
+        Task {
+            guard let score = try? await layaTone.score(for: text) else {
+                if currentGeneration == generation { showScoringFailed() }
+                return
+            }
+            guard currentGeneration == generation else { return }
+
+            guard let breakdown = try? await layaTone.breakdown(for: text) else {
+                if currentGeneration == generation { showScoringFailed() }
+                return
+            }
+            guard currentGeneration == generation else { return }
+
+            let emoji = NLTone.emoji(forScore: score)
+            statusItem.button?.title = emoji
+            summaryLabel.stringValue = "\(emoji)  \(String(format: "%.2f", score))"
+            showBreakdown(positive: breakdown.positive, neutral: breakdown.neutral, negative: breakdown.negative)
+            detailLabel.stringValue = preview
+        }
     }
 
     private func showBreakdown(positive: Int, neutral: Int, negative: Int) {
@@ -145,6 +176,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         summaryLabel.stringValue = "😐"
         showBreakdown(positive: 0, neutral: 0, negative: 0)
         detailLabel.stringValue = "Waiting for text. Type in any app and the tone of the focused text field appears here."
+    }
+
+    private func showLoadingModel() {
+        statusItem.button?.title = "⏳"
+        summaryLabel.stringValue = "⏳"
+        showBreakdown(positive: 0, neutral: 0, negative: 0)
+        detailLabel.stringValue = "Loading LayaKit model…"
+    }
+
+    private func showNoBundleConfigured() {
+        statusItem.button?.title = "⏳"
+        summaryLabel.stringValue = "⏳"
+        showBreakdown(positive: 0, neutral: 0, negative: 0)
+        detailLabel.stringValue = "No LayaKit bundle found. Run: hf download aac6fef/laya-multilingual-coreml --local-dir ~/\"Library/Application Support/ToneBar/laya-bundle\""
+    }
+
+    private func showModelFailed(_ error: Error) {
+        statusItem.button?.title = "⚠️"
+        summaryLabel.stringValue = "⚠️"
+        showBreakdown(positive: 0, neutral: 0, negative: 0)
+        detailLabel.stringValue = "LayaKit model failed to load: \(error.localizedDescription)"
+    }
+
+    private func showScoringFailed() {
+        statusItem.button?.title = "⚠️"
+        summaryLabel.stringValue = "⚠️"
+        showBreakdown(positive: 0, neutral: 0, negative: 0)
+        detailLabel.stringValue = "LayaKit couldn't score this text."
+    }
+
+    private func showCurrentLayaState() {
+        switch layaState {
+        case .ready:
+            showWaitingForText()
+        case .unavailable:
+            showNoBundleConfigured()
+        case .failed(let error):
+            showModelFailed(error)
+        case .notLoaded, .loading:
+            showLoadingModel()
+        }
     }
 
     private func showAccessibilityNeeded() {

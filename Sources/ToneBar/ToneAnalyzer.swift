@@ -1,7 +1,23 @@
 import Foundation
 import NaturalLanguage
 
-enum ToneAnalyzer {
+enum ToneBucket {
+    case positive
+    case neutral
+    case negative
+}
+
+func toneBucket(forScore score: Double) -> ToneBucket {
+    if score >= 0.2 {
+        return .positive
+    } else if score <= -0.2 {
+        return .negative
+    } else {
+        return .neutral
+    }
+}
+
+enum NLTone {
     static func emoji(for text: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
@@ -58,12 +74,12 @@ enum ToneAnalyzer {
         var negative = 0
         var neutral = 0
         for sentence in sentences {
-            let value = score(for: sentence)
-            if value >= 0.2 {
+            switch toneBucket(forScore: score(for: sentence)) {
+            case .positive:
                 positive += 1
-            } else if value <= -0.2 {
+            case .negative:
                 negative += 1
-            } else {
+            case .neutral:
                 neutral += 1
             }
         }
