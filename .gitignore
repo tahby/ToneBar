@@ -2,3 +2,4 @@
 .swiftpm/
 .DS_Store
 eval/sst2/
+*.app/
